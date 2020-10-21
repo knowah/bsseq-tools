@@ -1,0 +1,106 @@
+#!/usr/bin/python3
+
+import argparse
+import gzip
+import sys
+
+infn = argv[1]
+
+parser = argparse.ArgumentParser()
+parser.add_argument("infile", help="sorted input file in format: chr pos pos methy_pct mC_count uMC_count (note: the second 'pos' column and the 'methy_pct' columns are ignored")
+parser.add_argument("-r", "--reference", required=True, help="reference bed file containing CpG locations (only 'chr' and 'start' columns are looked at)")
+parser.add_argument("-b", "--bedgraph", action="store_true", help="write output as bedgraph")
+parser.add_argument("-k", "--keep", action="store_true", help="keep CpGs not in reference (NOT IMPLEMENTED)")
+args = parser.parse_args()
+
+if args.infile.endswith(".gz"):
+	fopen = gzip.open
+else:
+	fopen = open
+
+if args.keep:
+	print("--keep not implemented! please use the other script to combine strands in a reference-agnostic way", file=sys.stderr)
+	sys.exit(1)
+
+CG_ref = {}
+with open(args.reference) as inf:
+	for line in inf:
+		(chrom, start) = line.rstrip().split('\t')[0:2]
+		if not chrom in CG_ref:
+			CG_ref[chrom] = []
+		CG_ref[chrom].append(int(start))
+
+def process_line(ln):
+	if ln in [None, '']:
+		return None
+	tokens = ln.rstrip('\n').split('\t')
+	return [tokens[0]] + [int(tokens[x]) for x in [1,4,5]]
+
+def write_line(tokens, expand=1):
+	if args.bedgraph:
+		tokens = [tokens[0], tokens[1], tokens[1]+expand, "{0.3f}%".format((100.0 * tokens[2]) / (tokens[2] + tokens[3])), tokens[2], tokens[3]])
+	
+	print("\t".join([str(x) for x in tokens]))
+
+with fopen(args.infile, 'rt') as inf:
+	seen_chroms = set()
+	prev_chrom = None
+	prev_pos = None
+	prev_mC = 0
+	prev_umC = 0
+	lineno = 0
+	while True:
+		lineno += 1
+		this_line = process_line(inf.readline())
+		if this_line is None:
+			break
+		(chrom, pos, mC, umC) = this_line
+		
+		if chrom not in CG_ref:
+			if chrom is not prev_chrom:
+				if chrom in seen_chroms:
+					print("Error! File not sorted: chrom {} on line {} is out of order.".format(chrom, lineno), file=sys.stderr)
+					sys.exit(2)
+				else:
+					write_line([prev_chrom, prev_pos, prev_mC, prev_umC])
+					seen_chroms.add(prev_chrom)
+			else:
+				if pos <= prev_pos:
+					print("Error! File not sorted: {}:{} on line {} is out of order.".format(chrom, pos, lineno), file=sys.stderr)
+					sys.exit(3)
+				if pos in CG_ref[chrom]: # C on + strand
+					if prev_pos is not None:
+						write_line([prev_chrom, prev_pos, prev_mC, prev_umC])
+					prev_chrom = chrom
+					prev_pos = pos
+					prev_mC = mC
+					prev_umC = umC
+				elif pos-1 in CG_ref[chrom]: # C on - strand
+					if pos-1 == prev_pos:
+						write_line([
+				else:
+					handle_nonref_CG(this_line)
+		else:
+			handle_nonref_CG(this_line)
+
+
+
+	prev_line = process_line(inf.readline())
+	while True:
+		this_line = process_line(inf.readline())
+		if this_line is None:
+			if prev_line is not None:
+				write_prev_line(prev_line)
+			break
+		elif prev_line is None:
+			prev_line = this_line
+			continue
+		elif this_line[0] == prev_line[0] and this_line[1] == prev_line[1]+1:
+			#print("{}\t{}\t{}\t{}".format(this_line[0], prev_line[1], int(prev_line[2]) + int(this_line[2]), int(prev_line[3]) + int(this_line[3])))
+			write_line([this_line[0], prev_line[1], prev_line[2] + this_line[2], prev_line[3] + this_line[3]], expand=1)
+			prev_line = None
+			continue
+	
+		write_line(prev_line)
+		prev_line = this_line
+

@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+
+import argparse
+import gzip
+import sys
+
+parser = argparse.ArgumentParser()
+parser.add_argument("callfile", type=str, help="Methylation calls [use - for stdin] (format: chr pos umC mC; same as collate_bismark_methy_calls)")
+parser.add_argument("-c", "--canonical", type=str, help="File containing canonical CpGs, to which output will be limited (only first two columns used, indicating chrom and + coord of C)")
+parser.add_argument("--mincov", type=int, default=1, help="Minimum coverage to include CpG in wig")
+parser.add_argument("--span1", action="store_true", help="Use span=1 in the wig file (instead of span=2; can help with conversion to bigWig if not using --canonical)")
+args = parser.parse_args()
+
+SPAN = 2 if not args.span1 else 1
+
+fopen = open
+if args.callfile.endswith(".gz"):
+    fopen = gzip.open
+if args.callfile == "-":
+    args.callfile = 0 #stdin
+
+print("START", file=sys.stderr)
+canonCG = {}
+if args.canonical:
+    with open(args.canonical) as cf:
+        for line in cf:
+            chrom, pos = line.rstrip().split()[0:2]
+            if chrom not in canonCG:
+                canonCG[chrom] = set()
+            canonCG[chrom].add(int(pos))
+print("DONE reading canonical file: {} {}".format(len(canonCG.keys()), sum([len(canonCG[c]) for c in canonCG])),file=sys.stderr)
+
+with fopen(args.callfile, 'rt') as inf:
+    curr_chrom = None
+    for line in inf:
+        chrom, pos, umC, mC = line.rstrip().split('\t')[0:4]
+        #print("==={} {}".format(chrom, pos), file=sys.stderr)
+        pos = int(pos)
+        if args.canonical and (chrom not in canonCG or pos not in canonCG[chrom]):
+            continue
+
+        cov = int(umC)+int(mC)
+        #print("{} {} {}".format(umC, mC, cov), file=sys.stderr)
+        if cov < args.mincov:
+            continue
+
+        if chrom != curr_chrom:
+            curr_chrom = chrom
+            print('variableStep chrom={} span={}'.format(curr_chrom, SPAN))
+
+        methy = float(mC) / cov
+        #print('{} {:.3f}'.format(pos, methy),file=sys.stderr)
+        print('{} {:.3f}'.format(pos, methy))

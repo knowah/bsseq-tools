@@ -1,0 +1,81 @@
+#!/usr/bin/python3
+
+import argparse
+import gzip
+import sys
+from sort_chroms import sorted_chroms
+
+parser = argparse.ArgumentParser()
+parser.add_argument("methy_file", type=str, help="Methylation call file (e.g., CpG_...txt.gz) from bismark_methylation_extractor. May be gzipped or uncompressed.")
+parser.add_argument("-H", "--has_header", action="store_true", help="Ignore first line of input")
+parser.add_argument("-u", "--unsorted_chrom", action="store_true", help="Don't sort chromosomes in output")
+parser.add_argument("-m", "--cov_and_meth", action="store_true", help="Include coverage and methylation in output")
+parser.add_argument("-q", "--quiet", action="store_true", help="Don't output messages")
+args = parser.parse_args()
+
+## process arguments
+
+if args.methy_file.endswith(".gz"):
+	fopen = gzip.open
+else:
+	fopen = open
+
+## iterate through file
+methy_data = {}
+
+with fopen(args.methy_file, 'rt') as methyf:
+	lineno = 0
+	
+	# skip header if requested
+	if args.has_header:
+		methyf.readline()
+		lineno = 1
+
+	for line in methyf:
+		lineno += 1
+		
+		# process line
+		tokens = line.rstrip('\n').split('\t')
+		try:
+			chrom = tokens[2]
+			pos = int(tokens[3])
+			methy_call = tokens[4]
+		except:
+			print("Incorrectly-formatted entry on line {}: {}".format(lineno, line.rstrip()), file=sys.stderr)
+			sys.exit(1)
+
+		# intialize dict entry if needed
+		if chrom not in methy_data:
+			methy_data[chrom] = {}
+		
+		if pos not in methy_data[chrom]:
+			methy_data[chrom][pos] = [0, 0] # umC, mC
+
+		# interpret methy call
+		if methy_call == 'Z':
+			methy_data[chrom][pos][1] += 1
+		elif methy_call == 'z':
+			methy_data[chrom][pos][0] += 1
+		else:
+			print("Invalid methylation call on line {}: {}".format(lineno, methy_call), file=sys.stderr)
+			sys.exit(2)
+		
+		if not args.quiet and lineno % 1000000 == 0:
+			print("Processed {} lines".format(lineno), file=sys.stderr)
+
+## write out methy data
+if args.unsorted_chrom:
+	chroms = methy_data.keys()
+else:
+	chroms = sorted_chroms(methy_data.keys())
+
+for c in chroms:
+	poss = sorted(methy_data[c].keys())
+	for p in poss:
+		if args.cov_and_meth:
+			cov = methy_data[c][p][0] + methy_data[c][p][1]
+			meth = methy_data[c][p][1] / cov 
+			print("{}\t{}\t{}\t{}\t{}\t{:.3f}".format(c, p, methy_data[c][p][0], methy_data[c][p][1], cov, meth))
+		else:
+			print("{}\t{}\t{}\t{}".format(c, p, methy_data[c][p][0], methy_data[c][p][1]))
+			

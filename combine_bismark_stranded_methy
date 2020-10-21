@@ -1,0 +1,54 @@
+#!/usr/bin/python3
+
+import argparse
+import gzip
+import sys
+from sort_chroms import sorted_chroms
+
+parser = argparse.ArgumentParser()
+parser.add_argument("plus_file", type=str)
+parser.add_argument("minus_file", type=str)
+parser.add_argument("-v", "--verbose", action="store_true")
+args = parser.parse_args()
+
+methy_counts = {}
+
+def read_methy(fn, offset, verbose=False):
+	if fn.endswith(".gz"):
+		fopen = gzip.open
+	else:
+		fopen = open
+	with fopen(fn, 'rt') as inf:
+		lineno = 0
+		for line in inf:
+			lineno += 1
+			if verbose and lineno % 1000000 == 0:
+				print("Read {} lines".format(lineno), file=sys.stderr)
+
+			(chrom, pos, umC, mC) = line.rstrip('\n').split('\t')[0:4]
+			pos = int(pos) + offset
+			umC = int(umC)
+			mC = int(mC)
+
+			if chrom not in methy_counts:
+				methy_counts[chrom] = {}
+
+			if pos not in methy_counts[chrom]:
+				methy_counts[chrom][pos] = [0, 0]
+
+			methy_counts[chrom][pos][0] += umC
+			methy_counts[chrom][pos][1] += mC
+
+if args.verbose:
+	print("Reading from {}...".format(args.plus_file), file=sys.stderr)
+read_methy(args.plus_file, 0, args.verbose)
+if args.verbose:
+	print("Reading from {}...".format(args.minus_file), file=sys.stderr)
+read_methy(args.minus_file, -1, args.verbose)
+print("Done reading input", file=sys.stderr)
+
+s_chroms = sorted_chroms(methy_counts.keys())
+
+for chrom in s_chroms:
+	for pos in sorted(methy_counts[chrom].keys()):
+		print("{}\t{}\t{}\t{}".format(chrom, pos, methy_counts[chrom][pos][0], methy_counts[chrom][pos][1]))

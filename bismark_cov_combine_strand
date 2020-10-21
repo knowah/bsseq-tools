@@ -1,0 +1,50 @@
+#!/usr/bin/python3
+
+#from sys import argv
+import argparse
+import gzip
+
+infn = argv[1]
+
+parser = argparse.ArgumentParser()
+parser.add_argument("infile", help="input file in format chr pos pos methy_pct mC_count uMC_count")
+parser.add_argument("-b", "--bedgraph", action="store_true", help="write output as bedgraph")
+args = parser.parse_args()
+
+if args.infile.endswith(".gz"):
+	fopen = gzip.open
+else:
+	fopen = open
+
+def process_line(ln):
+	if ln in [None, '']:
+		return None
+	tokens = ln.rstrip('\n').split('\t')
+	return [tokens[0]] + [int(tokens[x]) for x in [1,4,5]]
+
+def write_line(tokens, expand=0):
+	if args.bedgraph:
+		tokens = [tokens[0], tokens[1], tokens[1]+expand, "{0.3f}%".format((100.0 * tokens[2]) / (tokens[2] + tokens[3])), tokens[2], tokens[3]])
+	
+	print("\t".join([str(x) for x in tokens]))
+
+with fopen(args.infile, 'rt') as inf:
+	prev_line = process_line(inf.readline())
+	while True:
+		this_line = process_line(inf.readline())
+		if this_line is None:
+			if prev_line is not None:
+				write_line(prev_line)
+			break
+		elif prev_line is None:
+			prev_line = this_line
+			continue
+		elif this_line[0] == prev_line[0] and this_line[1] == prev_line[1]+1:
+			#print("{}\t{}\t{}\t{}".format(this_line[0], prev_line[1], int(prev_line[2]) + int(this_line[2]), int(prev_line[3]) + int(this_line[3])))
+			write_line([this_line[0], prev_line[1], prev_line[2] + this_line[2], prev_line[3] + this_line[3]], expand=1)
+			prev_line = None
+			continue
+	
+		write_line(prev_line)
+		prev_line = this_line
+
